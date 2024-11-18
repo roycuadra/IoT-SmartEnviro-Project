@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>IoT SmartEnviro</title>
+    <style>
+        :root {
+            --background-color: #0d1722;
+            --card-background: #ffffff;
+            --primary-color: #2980b9;
+            --text-color: #34495e;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            /* Default font */
+            background-color: var(--background-color);
+            display: flex;
+            flex-direction: column;
+            /* Stack items vertically */
+            justify-content: center;
+            align-items: center;
+            color: #333;
+            margin-top: 150px;
+        }
+
+        .container {
+            border-radius: 20px;
+            padding: 40px;
+            background-color: var(--card-background);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        h1 {
+            color: var(--text-color);
+            margin-bottom: 20px;
+            font-size: 2em;
+            font-weight: 700;
+        }
+
+        p {
+            font-size: 1.2em;
+            margin: 10px 0;
+            font-weight: 500;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .emoji {
+            font-size: 1.5em;
+        }
+
+        footer {
+            margin-top: 20px;
+            /* Space between container and footer */
+            color: var(--text-color);
+            font-size: 1.2em;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            /* Hidden by default */
+            position: fixed;
+            /* Stay in place */
+            z-index: 1000;
+            /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%;
+            /* Full width */
+            height: 100%;
+            /* Full height */
+            overflow: auto;
+            /* Enable scroll if needed */
+            background-color: rgba(0, 0, 0, 0.4);
+            /* Black w/ opacity */
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            /* 15% from the top and centered */
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            /* Could be more or less, depending on screen size */
+            border-radius: 10px;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 1.6em;
+            }
+
+            p {
+                font-size: 1em;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>IoT SmartEnviro</h1>
+        <div id="content">
+            <p id="temp"><span class="emoji">🌡️</span> Temperature: %TEMP%</p>
+            <p id="humidity"><span class="emoji">💧</span> Humidity: %HUMIDITY%</p>
+            <p id="heatIndex"><span class="emoji">🔥</span> Heat Index: %HEATINDEX%</p>
+        </div>
+        <button id="logButton">Show Logs</button>
+        <button id="exportCSV">Export Logs as CSV</button><!-- Button to open modal -->
+    </div>
+
+    <footer>
+        <div>Current Time: <span id="currentTime">0</span></div>
+        <div>Uptime: <span id="uptimeValue">0</span> seconds</div>
+    </footer>
+
+    <!-- The Modal -->
+    <div id="logModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Logs</h2>
+            <div id="logContainer">
+                <!-- Logs will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const startTime = Date.now(); // Capture the start time
+            let previousData = { temp: null, humidity: null, heatIndex: null };
+            const logs = []; // Array to store log entries
+            const logLimit = 100; // Limit for displayed logs
+            let updateTimeout;
+    
+            // Initialize WebSocket connection
+            const connection = new WebSocket(`ws://${window.location.hostname}:81/`);
+            connection.onmessage = debounce(handleIncomingData, 300); // Debounce updates
+    
+            // Update uptime and current time every second
+            setInterval(() => {
+                updateUptime();
+                updateCurrentTime();
+            }, 1000);
+    
+            // Modal functionality
+            setupModal();
+    
+            // Export Logs as CSV
+            document.getElementById('exportCSV').addEventListener('click', () => exportLogs('csv'));
+    
+            function handleIncomingData(event) {
+                const data = JSON.parse(event.data);
+    
+                // Update the UI
+                updateElement('temp', `<span class="emoji">🌡️</span> Temperature: ${data.temp}°C`);
+                updateElement('humidity', `<span class="emoji">💧</span> Humidity: ${data.humidity}%`);
+                updateElement('heatIndex', `<span class="emoji">🔥</span> Heat Index: ${data.heatIndex}°C`);
+    
+                // Log data only if there's a change
+                if (data.temp !== previousData.temp || data.humidity !== previousData.humidity || data.heatIndex !== previousData.heatIndex) {
+                    const timestamp = new Date().toLocaleString();
+                    const logEntry = `${timestamp} - Temperature: ${data.temp}°C, Humidity: ${data.humidity}%, Heat Index: ${data.heatIndex}°C`;
+                    addLog(logEntry);
+                    logs.push({ timestamp, temp: data.temp, humidity: data.humidity, heatIndex: data.heatIndex });
+                    if (logs.length > logLimit) logs.shift(); // Maintain log limit
+                    previousData = { ...data };
+                }
+            }
+    
+            function updateUptime() {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const hours = Math.floor(elapsed / 3600);
+                const minutes = Math.floor((elapsed % 3600) / 60);
+                const seconds = elapsed % 60;
+                updateElement('uptimeValue', `${hours}h ${minutes}m ${seconds}s`);
+            }
+    
+            function updateCurrentTime() {
+                updateElement('currentTime', new Date().toLocaleString());
+            }
+    
+            function addLog(log) {
+                const logContainer = document.getElementById('logContainer');
+                const logElement = document.createElement('p');
+                logElement.textContent = log;
+                logContainer.appendChild(logElement);
+    
+                // Remove excess logs for better performance
+                if (logContainer.children.length > logLimit) {
+                    logContainer.removeChild(logContainer.firstChild);
+                }
+    
+                logContainer.scrollTop = logContainer.scrollHeight; // Auto-scroll to the latest log
+            }
+    
+            function exportLogs(format) {
+                if (format !== 'csv') {
+                    console.error('Unsupported format. Only CSV is supported.');
+                    return;
+                }
+    
+                const header = 'Timestamp,Temperature,Humidity,Heat Index\n';
+                const csvRows = logs.map(log => `${log.timestamp},${log.temp},${log.humidity},${log.heatIndex}`);
+                const dataStr = header + csvRows.join('\n');
+                const fileName = `logs_${new Date().toISOString().slice(0, 10)}.${format}`;
+    
+                const blob = new Blob([dataStr], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+    
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+    
+            function setupModal() {
+                const logModal = document.getElementById('logModal');
+                document.getElementById('logButton').onclick = () => (logModal.style.display = 'block');
+                document.getElementsByClassName('close')[0].onclick = () => (logModal.style.display = 'none');
+    
+                window.onclick = (event) => {
+                    if (event.target == logModal) logModal.style.display = 'none';
+                };
+            }
+    
+            function debounce(func, delay) {
+                return (...args) => {
+                    clearTimeout(updateTimeout);
+                    updateTimeout = setTimeout(() => func.apply(this, args), delay);
+                };
+            }
+    
+            function updateElement(id, content) {
+                document.getElementById(id).innerHTML = content;
+            }
+        });
+    </script>
+    
+    
+
+</body>
+
+</html>
