@@ -1,3 +1,9 @@
+## User Interface
+  <img src="./UI/UI.jpg" alt="Home" width="500">
+
+  <img src="./UI/UII.jpg" alt="Logs" width="400">
+
+
 ## Features
 - **Environmental Monitoring:**
   - Measures temperature, humidity, and calculates heat index using the Adafruit AHTX0 sensor.
