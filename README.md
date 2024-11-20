@@ -1,7 +1,7 @@
-## User Interface
+## User Interface Design
 <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-  <img src="./UI/UI.jpg" alt="Home" width="100">
-  <img src="./UI/UII.jpg" alt="Logs" width="100">
+  <img src="./UI/UI.jpg" alt="Home" width="350">
+  <img src="./UI/UII.jpg" alt="Logs" width="350">
 </div>
 
 ## Features
