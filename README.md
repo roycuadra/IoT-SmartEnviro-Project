@@ -1,8 +1,8 @@
 ## User Interface
+<div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
   <img src="./UI/UI.jpg" alt="Home" width="500">
-
   <img src="./UI/UII.jpg" alt="Logs" width="400">
-
+</div>
 
 ## Features
 - **Environmental Monitoring:**
