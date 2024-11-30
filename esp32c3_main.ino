@@ -10,44 +10,40 @@ const char* apSSID = "IOT SmartEnviro";
 const char* apPassword = "cuadra12345";
 
 // Pins for motion detection
-const int buzzerPin = 1; // GPIO1 for the passive buzzer
-const int ledPin = 4;               // Pin connected to the LED
-const int sensorPin = 5;            // Pin connected to the sensor
-const unsigned long motionTimeout = 2000; 
-
-unsigned long lastMotionTime = 0;   
-bool motionDetected = false;        
-
-// Function to pulse the buzzer tone
-void playBuzzerPulse() {
-    for (int i = 0; i < 5; i++) { 
-        tone(buzzerPin, 3000); 
-        delay(100);            
-        noTone(buzzerPin);     
-        delay(100);            
-    }
-}
+const int buzzerPin = 1; 
+const int ledPin = 4;
+const int sensorPin = 5;
+const unsigned long motionTimeout = 2000;
 
 WebServer server(80);
-WebSocketsServer webSocket = WebSocketsServer(81);
+WebSocketsServer webSocket(81);
 
 Adafruit_AHTX0 aht;
 bool sensorConnected = false;
-String htmlContent;  
+String htmlContent;
 
-// Time tracking for AP client check
+// Timing constants
+const unsigned long clientCheckInterval = 120000;
+const unsigned long sensorPollInterval = 1000;
+
+// Timing variables
 unsigned long lastClientCheckMillis = 0;
-const long clientCheckInterval = 120000; // 2 minutes in milliseconds
+unsigned long lastSensorCheck = 0;
+unsigned long lastMotionTime = 0;
 
-// Load HTML file into memory once during setup to reduce SPIFFS access
+// Motion state
+bool motionDetected = false;
+bool apActive = true;
+
+// Load HTML content once during setup
 void loadHTMLContent() {
     File file = SPIFFS.open("/index.html", "r");
-    if (!file) {
+    if (file) {
+        htmlContent = file.readString();
+        file.close();
+    } else {
         Serial.println("Failed to open index.html file");
-        return;
     }
-    htmlContent = file.readString();
-    file.close();
 }
 
 // Handle root page request
@@ -58,46 +54,40 @@ void handle_OnConnect() {
     tempHtml.replace("%HEATINDEX%", "loading..");
     server.send(200, "text/html", tempHtml);
 
-    // Reset the last client check time whenever a client connects
-    lastClientCheckMillis = millis();
+    lastClientCheckMillis = millis(); // Reset client check timer
 }
 
 void handle_NotFound() {
     server.send(404, "text/plain", "Not found");
 }
 
-// Calculate heat index with optimized precomputed constants
+// Calculate heat index
 float calculateHeatIndex(float temperature, float humidity) {
     if (humidity < 0 || humidity > 100 || temperature < -30 || temperature > 50) return NAN;
 
     float T = (temperature * 9.0 / 5.0) + 32;
-    float HI = -42.379 + 2.04901523 * T +
-               10.14333127 * humidity -
-               0.22475541 * T * humidity -
-               0.00683783 * T * T -
-               0.05481717 * humidity * humidity +
-               0.00122874 * T * T * humidity +
-               0.00085282 * T * humidity * humidity -
-               0.00000199 * T * T * humidity * humidity;
+    float HI = -42.379 + 2.04901523 * T + 10.14333127 * humidity 
+               - 0.22475541 * T * humidity - 0.00683783 * T * T 
+               - 0.05481717 * humidity * humidity 
+               + 0.00122874 * T * T * humidity 
+               + 0.00085282 * T * humidity * humidity 
+               - 0.00000199 * T * T * humidity * humidity;
 
     return (HI - 32) * 5.0 / 9.0;
 }
 
-// Send data via WebSocket
+// Send updates via WebSocket
 void sendWebSocketUpdates(float temperature, float humidity) {
     float heatIndex = calculateHeatIndex(temperature, humidity);
-    String json = "{\"temp\":\"" + String(temperature, 1) +
-                  "\",\"humidity\":\"" + String(humidity, 1) +
-                  "\",\"heatIndex\":\"" + String(heatIndex, 1) + "\"}";
+    String json = "{\"temp\":\"" + String(temperature, 1) + "\","
+                  "\"humidity\":\"" + String(humidity, 1) + "\","
+                  "\"heatIndex\":\"" + String(heatIndex, 1) + "\"}";
     webSocket.broadcastTXT(json);
 }
 
-// Check sensor and send updates if values change
+// Monitor environment sensor
 void checkEnvironmentSensor() {
-    static unsigned long lastSensorCheck = 0;
-    const unsigned long interval = 1000; // Poll every 1 second
-
-    if (millis() - lastSensorCheck < interval) return;
+    if (millis() - lastSensorCheck < sensorPollInterval) return;
     lastSensorCheck = millis();
 
     if (!sensorConnected) return;
@@ -120,80 +110,78 @@ void checkEnvironmentSensor() {
     }
 }
 
-// Check motion and control LED
-void checkMotionSensor() {
-    bool currentMotionState = digitalRead(sensorPin); // Read the current sensor value
+// Play buzzer pulse
+void playBuzzerPulse() {
+    for (int i = 0; i < 5; i++) {
+        tone(buzzerPin, 3000);
+        delay(100);
+        noTone(buzzerPin);
+        delay(100);
+    }
+}
 
-    // If motion is detected
-    if (currentMotionState == HIGH) {
-        if (!motionDetected) {
-            // First time detecting motion, log and turn the LED on
-            Serial.println("Motion detected!");
-            motionDetected = true;
-            lastMotionTime = millis(); // Store the time when motion was first detected
-            digitalWrite(ledPin, HIGH); // Turn the LED on
-            playBuzzerPulse(); // Play pulsing buzzer tone
-        }
-    } else {
-        // Motion is no longer detected, check if motion stopped long enough
-        if (motionDetected && millis() - lastMotionTime >= motionTimeout) {
-            Serial.println("Motion stopped!");
-            motionDetected = false; 
-            digitalWrite(ledPin, LOW); 
-            noTone(buzzerPin); 
-        }
+// Check motion sensor
+void checkMotionSensor() {
+    bool currentMotionState = digitalRead(sensorPin);
+
+    if (currentMotionState == HIGH && !motionDetected) {
+        Serial.println("Motion detected!");
+        motionDetected = true;
+        lastMotionTime = millis();
+        digitalWrite(ledPin, HIGH);
+        playBuzzerPulse();
+    }
+
+    if (motionDetected && millis() - lastMotionTime >= motionTimeout) {
+        Serial.println("Motion stopped!");
+        motionDetected = false;
+        digitalWrite(ledPin, LOW);
+        noTone(buzzerPin);
     }
 }
 
 void setup() {
     Serial.begin(115200);
 
-    // Setup pins
     pinMode(ledPin, OUTPUT);
     pinMode(sensorPin, INPUT);
     pinMode(buzzerPin, OUTPUT);
 
-    Serial.println("Starting fresh...");
-
     WiFi.softAP(apSSID, apPassword);
-    Serial.println("Access Point started");
     Serial.print("AP IP Address: ");
     Serial.println(WiFi.softAPIP());
 
     if (!SPIFFS.begin(true)) {
-        Serial.println("An error has occurred while mounting SPIFFS");
+        Serial.println("SPIFFS mount failed");
         return;
     }
 
-    loadHTMLContent();  // Load and cache HTML content
-
+    loadHTMLContent();
     sensorConnected = aht.begin();
-    if (!sensorConnected) {
-        Serial.println("Could not find AHT30 sensor!");
-    } else {
-        Serial.println("AHT30 sensor initialized successfully.");
-    }
+    Serial.println(sensorConnected ? "AHT30 sensor initialized" : "AHT30 sensor not found");
 
     server.on("/", handle_OnConnect);
     server.onNotFound(handle_NotFound);
     server.begin();
     webSocket.begin();
-
     Serial.println("HTTP and WebSocket servers started");
 }
 
 void loop() {
     unsigned long currentMillis = millis();
-    server.handleClient();
-    webSocket.loop();
-    checkEnvironmentSensor();
-    checkMotionSensor();
 
-    // Check for connected clients
-    if (WiFi.softAPgetStationNum() > 0) {
-        lastClientCheckMillis = currentMillis; 
-    } else if (currentMillis - lastClientCheckMillis >= clientCheckInterval) {
-        WiFi.softAPdisconnect(true); 
-        Serial.println("No clients connected for 2 minutes. AP turned off.");
+    if (apActive) {
+        server.handleClient();
+        webSocket.loop();
+        checkEnvironmentSensor();
+        checkMotionSensor();
+
+        if (WiFi.softAPgetStationNum() > 0) {
+            lastClientCheckMillis = currentMillis;
+        } else if (currentMillis - lastClientCheckMillis >= clientCheckInterval) {
+            WiFi.softAPdisconnect(true);
+            Serial.println("No clients for 2 minutes. AP turned off.");
+            apActive = false;
+        }
     }
 }
